@@ -118,6 +118,7 @@ async def my_agent(ctx: JobContext):
 
     # Join the room and connect to the user
     await ctx.connect()
+    await session.say("Welcome to the resume assistant!", allow_interruptions=False)
 
 
 if __name__ == "__main__":
