@@ -1,125 +1,154 @@
 import logging
-
+import chromadb
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 from dotenv import load_dotenv
-from livekit import rtc
+import asyncio
 from livekit.agents import (
     Agent,
-    AgentServer,
     AgentSession,
     JobContext,
     JobProcess,
+    RoomInputOptions,
+    RoomOutputOptions,
+    WorkerOptions,
     cli,
-    inference,
-    room_io,
+    function_tool,
+    metrics,
+    inference
 )
-from livekit.plugins import noise_cancellation, silero
+from livekit.agents.voice import MetricsCollectedEvent
+from livekit.plugins import openai, silero, noise_cancellation,elevenlabs
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
+from livekit import rtc
 
-logger = logging.getLogger("agent")
+logger = logging.getLogger("resume-agent")
 
 load_dotenv(".env.local")
 
+# --- CHROMA DB SETUP ---
+# Initialize the database client once so it's ready for the agent
+# Ensure your resume data is in the 'resume_vectordb' folder
+try:
+    chroma_client = chromadb.PersistentClient(path="./resume_vectordb")
+    collection = chroma_client.get_or_create_collection(name="resume_entries")
+    logger.info("Connected to ChromaDB successfully.")
+except Exception as e:
+    logger.error(f"Failed to connect to ChromaDB: {e}")
 
-class Assistant(Agent):
+
+class ResumeAgent(Agent):
     def __init__(self) -> None:
         super().__init__(
-            instructions="""You are a helpful voice AI assistant. The user is interacting with you via voice, even if you perceive the conversation as text.
-            You eagerly assist users with their questions by providing information from your extensive knowledge.
-            Your responses are concise, to the point, and without any complex formatting or punctuation including emojis, asterisks, or other symbols.
-            You are curious, friendly, and have a sense of humor.""",
+            instructions="""
+            You are an AI representation of the job candidate. You are speaking directly to a recruiter.
+            
+            Your Persona:
+            - You ARE the candidate. Speak in the first person ("I have...", "My experience...").
+            - You are polite, professional, and confident.
+            
+            Your Strategy when evaluating a Job Description (JD):
+            1. Use the `evaluate_fit` tool to check your resume data.
+            2. **If you HAVE the matching skills:** Enthusiastically confirm it. Say: "Yes! I have strong experience with [skill]. For example, in my resume..." and mention the specific details found.
+            3. **If you MISS a specific skill:** Do NOT just say "No". Be polite and pivot to your strengths. 
+               - Say: "While I don't have direct experience with [missing skill] yet, I am very proficient in [related skill you DO have] and I am a fast learner."
+               - Always try to bridge the gap by highlighting the value you DO bring.
+            
+            Keep your responses spoken-style: natural, slightly conversational, and concise.
+            """,
         )
 
-    # To add tools, use the @function_tool decorator.
-    # Here's an example that adds a simple weather tool.
-    # You also have to add `from livekit.agents import function_tool, RunContext` to the top of this file
-    # @function_tool
-    # async def lookup_weather(self, context: RunContext, location: str):
-    #     """Use this tool to look up current weather information in the given location.
-    #
-    #     If the location is not supported by the weather service, the tool will indicate this. You must tell the user the location's weather is unavailable.
-    #
-    #     Args:
-    #         location: The location to look up weather information for (e.g. city name)
-    #     """
-    #
-    #     logger.info(f"Looking up weather for {location}")
-    #
-    #     return "sunny with a temperature of 70 degrees."
+    async def on_enter(self):
+        # Initial greeting when the agent joins
+        await self.session.say("I am ready. Please send the Job Description via chat.")
 
+    @function_tool
+    async def evaluate_fit(self, job_description: str) -> str:
+        """
+        Called when the user provides a Job Description (JD) to check for fit.
+        This tool searches the vector database for relevant experience.
 
-server = AgentServer()
+        Args:
+            job_description: The full text of the job description.
+        """
+        logger.info(f"Evaluating fit for JD: {job_description[:50]}...")
+
+        try:
+            # 1. Query ChromaDB for the most relevant resume sections
+            results = collection.query(
+                query_texts=[job_description],
+                n_results=5  # Retrieve top 5 matching chunks
+            )
+
+            # 2. Format the results
+            if results['documents'] and results['documents'][0]:
+                retrieved_context = "\n---\n".join(results['documents'][0])
+            else:
+                retrieved_context = "No relevant experience found in resume."
+
+            # 3. Return context to the LLM for final judgment
+            return (
+                f"RETRIEVED RESUME SECTIONS:\n{retrieved_context}\n\n"
+                f"INSTRUCTION: Compare the JD strictly against these sections.\n"
+                f"If key requirements are missing, you MUST say 'No'."
+            )
+        except Exception as e:
+            logger.error(f"ChromaDB query failed: {e}")
+            return "Error: Could not retrieve resume data. Please try again."
 
 
 def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
 
+# ---- ENTRYPOINT ----
+async def entrypoint(ctx: JobContext):
 
-server.setup_fnc = prewarm
-
-
-@server.rtc_session()
-async def my_agent(ctx: JobContext):
-    # Logging setup
-    # Add any other context you want in all log entries here
-    ctx.log_context_fields = {
-        "room": ctx.room.name,
-    }
-
-    # Set up a voice AI pipeline using OpenAI, Cartesia, AssemblyAI, and the LiveKit turn detector
     session = AgentSession(
-        # Speech-to-text (STT) is your agent's ears, turning the user's speech into text that the LLM can understand
-        # See all available models at https://docs.livekit.io/agents/models/stt/
-        stt=inference.STT(model="assemblyai/universal-streaming", language="en"),
-        # A Large Language Model (LLM) is your agent's brain, processing user input and generating a response
-        # See all available models at https://docs.livekit.io/agents/models/llm/
-        llm=inference.LLM(model="openai/gpt-4.1-mini"),
-        # Text-to-speech (TTS) is your agent's voice, turning the LLM's text into speech that the user can hear
-        # See all available models as well as voice selections at https://docs.livekit.io/agents/models/tts/
-       tts=inference.TTS(model="elevenlabs/eleven_flash_v2", language="en"),
-        # VAD and turn detection are used to determine when the user is speaking and when the agent should respond
-        # See more at https://docs.livekit.io/agents/build/turns
-        turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
-        # allow the LLM to generate a response while waiting for the end of turn
-        # See more at https://docs.livekit.io/agents/build/audio/#preemptive-generation
-        preemptive_generation=True,
+        llm=inference.LLM(model="gpt-4o"),
+        stt=inference.STT(model="assemblyai/universal-streaming", language="en"),
+        tts=inference.TTS(model="elevenlabs/eleven_flash_v2", language="en"),
+        turn_detection=MultilingualModel(),
     )
 
-    # To use a realtime model instead of a voice pipeline, use the following session setup instead.
-    # (Note: This is for the OpenAI Realtime API. For other providers, see https://docs.livekit.io/agents/models/realtime/))
-    # 1. Install livekit-agents[openai]
-    # 2. Set OPENAI_API_KEY in .env.local
-    # 3. Add `from livekit.plugins import openai` to the top of this file
-    # 4. Use the following session setup instead of the version above
-    # session = AgentSession(
-    #     llm=openai.realtime.RealtimeModel(voice="marin")
-    # )
+    # ---- DATA CHANNEL HANDLER ----
+    import asyncio
 
-    # # Add a virtual avatar to the session, if desired
-    # # For other providers, see https://docs.livekit.io/agents/models/avatar/
-    # avatar = hedra.AvatarSession(
-    #   avatar_id="...",  # See https://docs.livekit.io/agents/models/avatar/plugins/hedra
-    # )
-    # # Start the avatar and wait for it to join
-    # await avatar.start(session, room=ctx.room)
+    @ctx.room.on("data_received")
+    def on_data_received(dp: rtc.DataPacket):
+        asyncio.create_task(handle_data(dp))
 
-    # Start the session, which initializes the voice pipeline and warms up the models
+    async def handle_data(dp: rtc.DataPacket):
+        if dp.participant and dp.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT:
+            return
+
+        try:
+            message_text = dp.data.decode("utf-8")
+        except Exception as e:
+            logger.error(e)
+            return
+
+        # ✅ SAFE: session already started
+        await session.generate_reply(
+            user_input=f"Here is the Job Description: {message_text}. Am I a fit?"
+        )
+
+    # ---- START AGENT FIRST ----
     await session.start(
-        agent=Assistant(),
+        agent=ResumeAgent(),
         room=ctx.room,
-        room_options=room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(
-                noise_cancellation=lambda params: noise_cancellation.BVCTelephony()
-                if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
-                else noise_cancellation.BVC(),
-            ),
+        room_input_options=RoomInputOptions(
+            noise_cancellation=noise_cancellation.BVC(),
         ),
+        room_output_options=RoomOutputOptions(transcription_enabled=True),
     )
 
-    # Join the room and connect to the user
+    # ---- CONNECT ROOM ----
     await ctx.connect()
-    await session.say("Welcome to the resume assistant!", allow_interruptions=False)
+
+
+
 
 
 if __name__ == "__main__":
-    cli.run_app(server)
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, prewarm_fnc=prewarm))
