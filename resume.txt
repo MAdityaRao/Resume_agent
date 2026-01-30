@@ -1,0 +1,60 @@
+ 
+ADITYA
+Full Stack Developer & AI Engineer
+Belman, Karnataka, India
+Portfolio & AI Agent: https://madityarao.github.io/Resume/
+GitHub: github.com/MAdityaRao |  madityara5@gmail.com
+
+ 
+SUMMARY
+Full Stack Developer with hands-on production experience in Voice AI systems and cloud infrastructure. Specialized in building and deploying low-latency, enterprise-grade AI agents using LiveKit, AWS, and modern web technologies. Proven ability to deliver real-world client solutions involving payments, logistics, and scalable web architectures. Creator of a JD-aware AI screening agent using RAG that transparently evaluates role fit based strictly on verified experience.
+
+ 
+TECHNICAL SKILLS
+Core: Python (Data Analysis, ML), JavaScript (ES6+), Node.js, HTML5, CSS3
+AI & ML: LiveKit (Real-time Voice AI), LangChain, LSTM (Time-Series), Pandas, OpenCV
+Cloud & DevOps: AWS (Hosting, Route53), Git/GitHub, WebSockets
+Web & APIs: REST APIs, Express.js, Razorpay Integration, Shiprocket API
+
+ 
+EXPERIENCE
+Torq Designs — Part-Time Technical Solutions Partner
+2024 – Present
+
+● Integrated Razorpay payments and Shiprocket logistics APIs for e-commerce clients, enabling automated order processing.
+● Deployed and managed client websites on AWS, including hosting, DNS, and custom domain setup.
+● Shifted agency focus from design-only work to technology-driven solutions, building custom automations to solve operational bottlenecks.
+● Conducted data-driven competitor analysis to guide branding and feature strategy.
+ 
+PROJECTS
+TorqAgents — Enterprise Voice Intelligence Platform
+Owner & Lead Developer
+Tech: LiveKit Cloud, Node.js, Express.js, WebSockets, Vanilla JS
+
+● Built a real-time AI voice agent with sub-500ms latency for human-like conversations.
+● Designed a secure token-based backend for dynamic authentication and session management.
+● Developed a responsive frontend with real-time audio waveform visualization.
+● Status: Production-deployed; extending reasoning using LangChain.
+ Live Demo & Agent: https://madityarao.github.io/Resume/
+
+ 
+Areca Nut Price Predictor (ML)
+Tech: Python, LSTM, Pandas
+
+● Developed a time-series forecasting model to predict Areca nut prices, helping local farmers identify optimal selling periods.
+ 
+Buddle Toys — E-Commerce Platform
+Tech: AWS, Modern Web Technologies
+
+● Built and deployed the complete digital infrastructure for an eco-friendly toy brand, including AWS hosting and custom domain routing.
+ 
+EDUCATION
+B.Sc. in Data Analytics
+Dr. N.S.A.M. First Grade College, Nitte
+Focus: Data Structures, Statistical Analysis, Business Intelligence
+
+ 
+ 
+
+ 
+ 
