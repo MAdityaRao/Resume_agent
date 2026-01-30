@@ -51,35 +51,26 @@ class ResumeAgent(Agent):
             You are the job candidate. You are speaking to a recruiter. 
             
             Your Persona:
-            - **Tone:** Professional, grounded, and concise. Do not be overly "salesy" or enthusiastic.
-            - **Style:** Speak like a competent engineer/professional. Use plain English. Avoid corporate fluff or buzzwords.
+            - **Tone:** Professional, grounded, and concise.
+            - **Style:** Speak like a competent engineer. Use plain English.
             - **Format:** Keep answers short (2-3 sentences max per point).
 
             Your Strategy:
             1. Use the `evaluate_fit` tool to read your resume.
-            2. **For Matches:** State the match clearly and cite the specific project or experience from the resume. 
-               - *Bad:* "I am incredibly passionate and an expert at Python!"
-               - *Good:* "Yes, I have used Python extensively for the Areca Nut Price Predictor project."
-            3. **For Gaps:** Be honest but strategic. Acknowledge the gap, then mention a relevant transferable skill.
-               - *Bad:* "I don't know that but I'm a super fast learner and work hard!"
-               - *Good:* "I haven't used React professionally, but I am proficient in modern JavaScript and DOM manipulation."
-
-            Your goal is to sound like a smart, capable hire who respects the recruiter's time.
+            2. **For Matches:** Cite the specific project from the resume.
+            3. **For Gaps:** Acknowledge the gap, then mention a relevant transferable skill.
             """
         )
 
-    async def on_enter(self):
-        # This will speak as soon as the connection is established
+    # We use 'on_connect' to speak immediately when the agent joins
+    async def on_connect(self, ctx: JobContext):
+        logger.info("Agent connected. Sending greeting.")
+        # This will play uninterrupted because of the strict turn_detection below
         await self.session.say("I am connected. Please paste the Job Description and click submit so I can evaluate my fit.")
 
     @function_tool
     async def evaluate_fit(self, job_description: str) -> str:
-        """
-        Call this tool to compare the Job Description against the Candidate's Resume.
-        """
         logger.info(f"Evaluating fit for JD length: {len(job_description)}")
-        
-        # Direct text comparison instead of Vector Search
         return (
             f"MY RESUME CONTENT:\n{RESUME_CONTENT}\n\n"
             f"THE JOB DESCRIPTION:\n{job_description}\n\n"
@@ -91,13 +82,15 @@ def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
 
 
+
 async def entrypoint(ctx: JobContext):
     session = AgentSession(
         vad=ctx.proc.userdata["vad"],
         llm=inference.LLM(model="gpt-4o"),
         stt=inference.STT(model="assemblyai/universal-streaming", language="en"),
         tts=inference.TTS(model="elevenlabs/eleven_flash_v2", language="en"),
-        turn_detection=MultilingualModel(),
+        
+      
     )
 
     # ---- DATA HANDLER ----
@@ -111,8 +104,6 @@ async def entrypoint(ctx: JobContext):
 
         try:
             decoded_str = dp.data.decode("utf-8")
-            
-            # PARSE JSON from frontend
             try:
                 data_json = json.loads(decoded_str)
                 message_type = data_json.get("type")
@@ -123,8 +114,6 @@ async def entrypoint(ctx: JobContext):
 
             if message_type == "job_description" and content:
                 logger.info(f"Received JD via data channel: {content[:50]}...")
-                
-                # Trigger the Agent to process the JD
                 await session.generate_reply(
                     user_input=f"Here is the Job Description I need you to evaluate: {content}. Am I a fit?"
                 )
@@ -143,7 +132,6 @@ async def entrypoint(ctx: JobContext):
     )
 
     await ctx.connect()
-
 
 if __name__ == "__main__":
     cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, prewarm_fnc=prewarm))
