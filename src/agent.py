@@ -1,33 +1,25 @@
 import logging
 import os
+from dotenv import load_dotenv
+from livekit import rtc
 import json
 import asyncio
-from dotenv import load_dotenv
-
-# Set tokenizers parallelism before importing libraries that use it
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
 from livekit.agents import (
     Agent,
+    AgentServer,
     AgentSession,
     JobContext,
     JobProcess,
-    RoomInputOptions,
-    RoomOutputOptions,
-    WorkerOptions,
     cli,
-    function_tool,
-    inference
+    inference,
+    room_io,
+    utils,
 )
-from livekit.plugins import noise_cancellation, silero
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
-from livekit import rtc
+from livekit.plugins import noise_cancellation, silero, elevenlabs
 
-logger = logging.getLogger("resume-agent")
-
+logger = logging.getLogger("agent")
 load_dotenv(".env.local")
 
-# --- LOAD RESUME TEXT ---
 RESUME_FILE_PATH = "resume.txt"
 RESUME_CONTENT = ""
 
@@ -43,65 +35,54 @@ except Exception as e:
     logger.error(f"Failed to read resume.txt: {e}")
 
 
-class ResumeAgent(Agent):
+class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
-            instructions=
-            """
-            You are the job candidate. You are speaking to a recruiter. 
-            
-            Your Persona:
-            - **Tone:** Professional, grounded, and concise.
-            - **Style:** Speak like a competent engineer. Use plain English.
-            - **Format:** Keep answers short (2-3 sentences max per point).
-
-            Your Strategy:
-            1. Use the `evaluate_fit` tool to read your resume.
-            2. **For Matches:** Cite the specific project from the resume.
-            3. **For Gaps:** Acknowledge the gap, then mention a relevant transferable skill.
-            """
-        )
-
-    # We use 'on_connect' to speak immediately when the agent joins
-    async def on_connect(self, ctx: JobContext):
-        logger.info("Agent connected. Sending greeting.")
-        # This will play uninterrupted because of the strict turn_detection below
-        await self.session.say("I am connected. Please paste the Job Description and click submit so I can evaluate my fit.")
-
-    @function_tool
-    async def evaluate_fit(self, job_description: str) -> str:
-        logger.info(f"Evaluating fit for JD length: {len(job_description)}")
-        return (
-            f"MY RESUME CONTENT:\n{RESUME_CONTENT}\n\n"
-            f"THE JOB DESCRIPTION:\n{job_description}\n\n"
-            f"INSTRUCTION: Compare the JD strictly against my resume content above."
-        )
+            instructions=f"""
+You are Aditya AI Assistant, acting as a candidate in an interview.
+My resume is: {RESUME_CONTENT}
+Your task is to answer interview questions based strictly on my resume.
+Rules:
+- Keep each response under 30-45 words.
+- Tone: professional, concise, business-like.
+- Do not add explanations or extra suggestions.
+- dont answer unnecessary questions, only answer based on the resume.
+- Answer directly and naturally as if you are the candidate in a live interview.
+- if jd is one line like "i want a python developer", then say how you are a good fit based on your resume, but keep it concise.
+"""
+ )
+server = AgentServer()
 
 
 def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
 
 
+server.setup_fnc = prewarm
 
-async def entrypoint(ctx: JobContext):
+
+@server.rtc_session()
+async def my_agent(ctx: JobContext):
+    await ctx.connect()
+    
+    logger.info(f"Waiting for participant in room {ctx.room.name}")
+    participant = await utils.wait_for_participant(ctx.room)
+    logger.info(f"Participant joined: {participant.identity}")
+    
     session = AgentSession(
-        vad=ctx.proc.userdata["vad"],
-        llm=inference.LLM(model="gpt-4o"),
         stt=inference.STT(model="assemblyai/universal-streaming", language="en"),
+        llm=inference.LLM(model="openai/gpt-4o-mini"),
         tts=inference.TTS(model="elevenlabs/eleven_flash_v2", language="en"),
-        
-      
+        vad=ctx.proc.userdata["vad"],
+        preemptive_generation=True,
     )
-
-    # ---- DATA HANDLER ----
-    @ctx.room.on("data_received")
-    def on_data_received(dp: rtc.DataPacket):
-        asyncio.create_task(handle_data(dp))
-
+    
+    # Define data handler before registering it
     async def handle_data(dp: rtc.DataPacket):
+        # Ignore messages from agent itself
         if dp.participant and dp.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT:
             return
-
+        
         try:
             decoded_str = dp.data.decode("utf-8")
             try:
@@ -111,27 +92,36 @@ async def entrypoint(ctx: JobContext):
             except json.JSONDecodeError:
                 message_type = "raw"
                 content = decoded_str
-
-            if message_type == "job_description" and content:
-                logger.info(f"Received JD via data channel: {content[:50]}...")
-                await session.generate_reply(
-                    user_input=f"Here is the Job Description I need you to evaluate: {content}. Am I a fit?"
-                )
             
+            if message_type == "job_description" and content:
+                logger.info(f"Received JD via data channel: {content}...")
+                # Acknowledge receipt
+                await session.say("Job description received", allow_interruptions=False)
+                
         except Exception as e:
             logger.error(f"Error handling data packet: {e}")
-
-
+    
+    def on_data_received(dp: rtc.DataPacket):
+        asyncio.create_task(handle_data(dp))
+    
+    # Register the event handler
+    ctx.room.on("data_received", on_data_received)
+    
+    # Start the session
     await session.start(
-        agent=ResumeAgent(),
+        agent=Assistant(),
         room=ctx.room,
-        room_input_options=RoomInputOptions(
-            noise_cancellation=noise_cancellation.BVC(),
+        room_options=room_io.RoomOptions(
+            audio_input=room_io.AudioInputOptions(
+                noise_cancellation=lambda params: noise_cancellation.BVCTelephony()
+                if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+                else noise_cancellation.BVC(),
+            ),
         ),
-        room_output_options=RoomOutputOptions(transcription_enabled=True),
     )
+    
+    await session.say("Hello! paste your job description to get started.", allow_interruptions=True)
 
-    await ctx.connect()
 
 if __name__ == "__main__":
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, prewarm_fnc=prewarm))
+    cli.run_app(server)
