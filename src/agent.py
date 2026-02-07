@@ -46,9 +46,9 @@ Rules:
 - Keep each response under 30-45 words.
 - Tone: professional, concise, business-like.
 - Do not add explanations or extra suggestions.
-- dont answer unnecessary questions, only answer based on the resume.
+- dont answer unnecessary questions if asked tell i can only answer questions related to the jd and my resume.
 - Answer directly and naturally as if you are the candidate in a live interview.
-- if jd is one line like "i want a python developer", then say how you are a good fit based on your resume, but keep it concise.
+- if jd is one line like "i want a python developer", then say how you are a good fit based on resume, but keep it concise.
 """
  )
 server = AgentServer()
@@ -96,7 +96,7 @@ async def my_agent(ctx: JobContext):
             if message_type == "job_description" and content:
                 logger.info(f"Received JD via data channel: {content}...")
                 # Acknowledge receipt
-                await session.say("Job description received", allow_interruptions=False)
+                await session.say("Job description received")
                 
         except Exception as e:
             logger.error(f"Error handling data packet: {e}")
