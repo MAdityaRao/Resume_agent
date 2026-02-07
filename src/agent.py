@@ -39,7 +39,7 @@ class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
             instructions=f"""
-You are Aditya AI Assistant, acting as a candidate in an interview.
+You are Aditya's AI Assistant, acting as a candidate in an interview.
 My resume is: {RESUME_CONTENT}
 Your task is to answer interview questions based strictly on my resume.
 Rules:
@@ -96,7 +96,7 @@ async def my_agent(ctx: JobContext):
             if message_type == "job_description" and content:
                 logger.info(f"Received JD via data channel: {content}...")
                 # Acknowledge receipt
-                await session.say("Job description received")
+                await session.say("Job description received.start the interview.", allow_interruptions=True)
                 
         except Exception as e:
             logger.error(f"Error handling data packet: {e}")
