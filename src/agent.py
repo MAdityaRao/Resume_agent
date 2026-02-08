@@ -39,16 +39,18 @@ class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
             instructions=f"""
-You are Aditya's AI Assistant, acting as a candidate in an interview.
-My resume is: {RESUME_CONTENT}
-Your task is to answer interview questions based strictly on my resume.
-Rules:
-- Keep each response under 30-45 words.
-- Tone: professional, concise, business-like.
-- Do not add explanations or extra suggestions.
-- dont answer unnecessary questions if asked tell i can only answer questions related to the jd and my resume.
-- Answer directly and naturally as if you are the candidate in a live interview.
-- if jd is one line like "i want a python developer", then say how you are a good fit based on resume, but keep it concise.
+        Inputs Provided:
+        My resume: {RESUME_CONTENT}
+        job description (JD), if any.
+        Rules:
+        Answer strictly and only based on my resume and the JD.
+        Keep every answer 30–45 words maximum.
+        Tone must be professional, concise, and business-like.
+        Answer directly, as spoken in a real interview.
+        Do not add explanations, tips, or suggestions.
+        If the JD is very short or generic (e.g., “Python developer”), clearly state how my resume fits.
+        If the JD does not match my background, respond honestly and professionally.
+        dont answer question that are not part of interview
 """
  )
 server = AgentServer()
@@ -68,7 +70,7 @@ async def my_agent(ctx: JobContext):
     logger.info(f"Waiting for participant in room {ctx.room.name}")
     participant = await utils.wait_for_participant(ctx.room)
     logger.info(f"Participant joined: {participant.identity}")
-    
+    jd_analyzed = False
     session = AgentSession(
         stt=inference.STT(model="assemblyai/universal-streaming", language="en"),
         llm=inference.LLM(model="openai/gpt-4o-mini"),
@@ -94,9 +96,11 @@ async def my_agent(ctx: JobContext):
                 content = decoded_str
             
             if message_type == "job_description" and content:
-                logger.info(f"Received JD via data channel: {content}...")
-                # Acknowledge receipt
-                await session.say("Job description received.start the interview.", allow_interruptions=True)
+                nonlocal jd_analyzed
+                if not jd_analyzed:
+                    logger.info(f"Received JD via data channel: {content[:100]}...")
+    
+                    await session.say("Received job description ask questions", allow_interruptions=True)
                 
         except Exception as e:
             logger.error(f"Error handling data packet: {e}")
