@@ -59,9 +59,7 @@ server = AgentServer()
 def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
 
-
 server.setup_fnc = prewarm
-
 
 @server.rtc_session()
 async def my_agent(ctx: JobContext):
@@ -113,19 +111,17 @@ async def my_agent(ctx: JobContext):
     
     # Start the session
     await session.start(
-        agent=Assistant(),
-        room=ctx.room,
-        room_options=room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(
-                noise_cancellation=lambda params: noise_cancellation.BVCTelephony()
-                if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
-                else noise_cancellation.BVC(),
-            ),
+    agent=Assistant(),
+    room=ctx.room,
+    room_options=room_io.RoomOptions(
+        audio_input=room_io.AudioInputOptions(
+            noise_cancellation=lambda params: noise_cancellation.BVCTelephony()
+            if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+            else noise_cancellation.BVC(),
         ),
-    )
+    ),
+)
     
     await session.say("Hello! paste your job description to get started.", allow_interruptions=True)
-
-
 if __name__ == "__main__":
     cli.run_app(server)
