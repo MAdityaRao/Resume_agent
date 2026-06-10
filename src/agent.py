@@ -1,127 +1,93 @@
 import logging
-import os
+import pathlib
 from dotenv import load_dotenv
-from livekit import rtc
-import json
-import asyncio
+
 from livekit.agents import (
-    Agent,
-    AgentServer,
-    AgentSession,
     JobContext,
     JobProcess,
-    cli,
+    AgentServer,
+    Agent,
+    AgentSession,
+    TurnHandlingOptions,
     inference,
-    room_io,
-    utils,
+    cli,
 )
-from livekit.plugins import noise_cancellation, silero, elevenlabs
+from livekit.plugins import silero
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
-logger = logging.getLogger("agent")
-load_dotenv(".env.local")
+load_dotenv()
+logger = logging.getLogger("resume-agent")
+logger.setLevel(logging.INFO)
 
-RESUME_FILE_PATH = "resume.txt"
-RESUME_CONTENT = ""
+RESUME_PATH = pathlib.Path(str(__file__)).resolve().parent / "resume.txt"
+RESUME_TEXT = RESUME_PATH.read_text(encoding="utf-8").strip()
 
-try:
-    if os.path.exists(RESUME_FILE_PATH):
-        with open(RESUME_FILE_PATH, "r", encoding="utf-8") as f:
-            RESUME_CONTENT = f.read()
-        logger.info("resume.txt loaded successfully.")
-    else:
-        logger.warning("resume.txt not found! Using placeholder text.")
-        RESUME_CONTENT = "No resume text found. Please ensure resume.txt exists."
-except Exception as e:
-    logger.error(f"Failed to read resume.txt: {e}")
+SYSTEM_PROMPT = f"""
+You are a recruitment screening assistant. Your job is to evaluate whether a candidate
+is a good fit for a job description.
 
+You already have the candidate's resume:
 
-class Assistant(Agent):
-    def __init__(self) -> None:
-        super().__init__(
-            instructions=f"""
-        Inputs Provided:
-        My resume: {RESUME_CONTENT}
-        job description (JD), if any.
-        Rules:
-        Answer strictly and only based on my resume and the JD.
-        Keep every answer 30–45 words maximum.
-        Tone must be professional, concise, and business-like.
-        Answer directly, as spoken in a real interview.
-        Do not add explanations, tips, or suggestions.
-        If the JD is very short or generic (e.g., “Python developer”), clearly state how my resume fits.
-        If the JD does not match my background, respond honestly and professionally.
-        dont answer question that are not part of interview
+--- CANDIDATE RESUME ---
+{RESUME_TEXT}
+--- END RESUME ---
+
+WORKFLOW:
+1. When the conversation starts, you will ask the user to paste the job description.
+2. Once the user provides the job description, immediately evaluate the candidate.
+3. Give a clear verdict: Fit, Partial Fit, or Not a Fit — with one sentence reason.
+4. Then answer any follow-up questions the user has.
+
+RULES:
+- Keep every response short and direct — this is a voice conversation.
+- Never make up experience that is not in the resume.
+- If the user hasn't provided a JD yet, keep asking for it politely.
+- Once JD is provided, do not ask for it again.
 """
- )
+
+
+class ResumeAgent(Agent):
+    def __init__(self) -> None:
+        super().__init__(instructions=SYSTEM_PROMPT)
+
+    async def on_enter(self):
+        await self.session.say(
+            "Hi! Please paste the job description and I'll tell you if this candidate is a fit.",
+            allow_interruptions=True,
+        )
+
+
 server = AgentServer()
 
 
 def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
+    logger.info("Prewarm complete: VAD ready")
+
 
 server.setup_fnc = prewarm
 
+
 @server.rtc_session()
-async def my_agent(ctx: JobContext):
-    await ctx.connect()
-    
-    logger.info(f"Waiting for participant in room {ctx.room.name}")
-    participant = await utils.wait_for_participant(ctx.room)
-    logger.info(f"Participant joined: {participant.identity}")
-    jd_analyzed = False
+async def entrypoint(ctx: JobContext):
+    ctx.log_context_fields = {"room": ctx.room.name}
+
     session = AgentSession(
-        stt=inference.STT(model="assemblyai/universal-streaming", language="en"),
+        stt=inference.STT(model="deepgram/nova-3-general"),
         llm=inference.LLM(model="openai/gpt-4o-mini"),
-        tts=inference.TTS(model="elevenlabs/eleven_flash_v2", language="en"),
-        vad=ctx.proc.userdata["vad"],
-        preemptive_generation=True,
-    )
-    
-    # Define data handler before registering it
-    async def handle_data(dp: rtc.DataPacket):
-        # Ignore messages from agent itself
-        if dp.participant and dp.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT:
-            return
-        
-        try:
-            decoded_str = dp.data.decode("utf-8")
-            try:
-                data_json = json.loads(decoded_str)
-                message_type = data_json.get("type")
-                content = data_json.get("content")
-            except json.JSONDecodeError:
-                message_type = "raw"
-                content = decoded_str
-            
-            if message_type == "job_description" and content:
-                nonlocal jd_analyzed
-                if not jd_analyzed:
-                    logger.info(f"Received JD via data channel: {content[:100]}...")
-    
-                    await session.say("Received job description ask questions", allow_interruptions=True)
-                
-        except Exception as e:
-            logger.error(f"Error handling data packet: {e}")
-    
-    def on_data_received(dp: rtc.DataPacket):
-        asyncio.create_task(handle_data(dp))
-    
-    # Register the event handler
-    ctx.room.on("data_received", on_data_received)
-    
-    # Start the session
-    await session.start(
-    agent=Assistant(),
-    room=ctx.room,
-    room_options=room_io.RoomOptions(
-        audio_input=room_io.AudioInputOptions(
-            noise_cancellation=lambda params: noise_cancellation.BVCTelephony()
-            if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
-            else noise_cancellation.BVC(),
+        tts=inference.TTS(
+            model="cartesia/sonic-3",
+            voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
         ),
-    ),
-)
-    
-    await session.say("Hello! paste your job description to get started.", allow_interruptions=True)
+        vad=ctx.proc.userdata["vad"],
+        turn_handling=TurnHandlingOptions(
+            turn_detection=MultilingualModel(),
+        ),
+    )
+
+    await session.start(agent=ResumeAgent(), room=ctx.room)
+    await ctx.connect()
+
+
 if __name__ == "__main__":
     cli.run_app(server)

@@ -1,0 +1,40 @@
+Aditya | AI Agent Engineer
+madityara5@gmail.com | +91 73380 78108 | Belman, Karnataka
+github.com/MAdityaRao | madityarao.github.io/Resume_web
+
+SUMMARY
+AI Agent Engineer with hands-on experience building production-grade voice agents and LLM-powered automation. Specializes in real-time STT/TTS pipelines, multi-turn conversational logic, and scalable cloud infrastructure for hospitality and insurance domains.
+
+SKILLS
+Voice & Real-Time: LiveKit, WebRTC, STT/TTS Pipelines, Plivo SIP
+AI & Reasoning: LLM Integration (GPT/Claude), LangGraph, Multi-Turn Dialogue
+Engineering: Python, Flask, FastAPI, Google Sheets API, asyncpg, AWS, Git/GitHub
+Databases: PostgreSQL (NeonDB, Supabase), Schema Design, Atomic Transactions
+
+EXPERIENCE
+AI Agent Engineer (Part-Time) | Torq Designs | Aug 2025 – Present
+- Production voice and workflow automation agents for hospitality clients (TorqAgents)
+- End-to-end pipelines: telephony + real-time audio + LLM reasoning
+- AWS infrastructure with concurrent multi-agent deployment support
+
+INTERNSHIP
+AI Systems Developer | Torq Designs, Nitte AIC | May – Jun 2026 | 192 hrs
+- Built inbound hotel receptionist voice agent: LiveKit + Deepgram Nova-3 + GPT-4o + Deepgram Aura-2 (~200ms TTS latency)
+- Designed 8-table PostgreSQL schema on NeonDB (guests, rooms, bookings, payments, call logs)
+- Integrated Plivo SIP trunking with LiveKit for Indian PSTN routing
+- Built FastAPI backend with 8 REST endpoints for the hotel management dashboard
+
+PROJECTS
+Insurance Voice Agent | Python, LiveKit, GPT-4o-mini, Deepgram, PostgreSQL
+- Built "Arria" — a conversational voice agent for insurance policy management, claims tracking, and IRDAI regulation queries
+- Implemented tool-based reasoning: DB lookup, regulation retrieval, and human escalation with context handoff
+- Designed 5-table normalized PostgreSQL schema (customers, policies, claims, nominees, call logs) on NeonDB
+- Handled spoken policy number normalization and multi-turn context across full call lifecycle
+
+Hotel Booking Voice Agent | Python, LiveKit, GPT-4o, Google Sheets API
+- Autonomous inbound voice agent: greets, books, and confirms reservations with zero human intervention
+- Sub-500ms audio pipeline using LiveKit WebRTC + STT/TTS + LLM intent extraction
+- Auto-captures booking data to Google Sheets via API
+
+EDUCATION
+B.Sc. Data Analytics | Nitte Dr. N.S.A.M. First Grade College
