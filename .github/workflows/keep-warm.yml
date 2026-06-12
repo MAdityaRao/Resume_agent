@@ -1,0 +1,63 @@
+name: Keep LiveKit Agent Warm
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  warmup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install LiveKit API
+        run: pip install livekit-api
+
+      - name: Dispatch warmup job
+        env:
+          LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
+          LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
+          LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
+        run: |
+          python - <<'PYEOF'
+          import asyncio
+          import uuid
+          import os
+          from livekit import api
+
+          async def warmup():
+              room_name = f"warmup-{uuid.uuid4().hex[:8]}"
+              print(f"Creating warmup room: {room_name}")
+
+              lk = api.LiveKitAPI(
+                  url=os.environ["LIVEKIT_URL"],
+                  api_key=os.environ["LIVEKIT_API_KEY"],
+                  api_secret=os.environ["LIVEKIT_API_SECRET"],
+              )
+
+              try:
+                  await lk.room.create_room(
+                      api.CreateRoomRequest(
+                          name=room_name,
+                          empty_timeout=60,
+                          max_participants=1,
+                      )
+                  )
+                  print(f"Room created: {room_name}")
+
+                  dispatch = await lk.agent_dispatch.create_dispatch(
+                      api.CreateAgentDispatchRequest(
+                          agent_name="",
+                          room=room_name,
+                      )
+                  )
+                  print(f"Dispatch sent: {dispatch}")
+              finally:
+                  await lk.aclose()
+
+          asyncio.run(warmup())
+          PYEOF
