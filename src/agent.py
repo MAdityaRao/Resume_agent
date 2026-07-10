@@ -23,13 +23,6 @@ class ResumeAgent(Agent):
     def __init__(self) -> None:
         super().__init__(instructions=prompt())
 
-    async def on_enter(self):
-        await self.session.say(
-            "I'm Sharanya." " Aditya's personal assistant. "
-            "Ask me anything about him, or paste a job description.",
-            allow_interruptions=False,
-        )
-
 
 server = AgentServer()
 
@@ -56,12 +49,19 @@ async def entrypoint(ctx: JobContext):
             api_key=os.getenv("SARVAM_API_KEY"),
             target_language_code="en-IN",
             model="bulbul:v3",
-            speaker="ishita",
+            speaker="rohan",
         ),
         vad=ctx.proc.userdata["vad"],
+        min_endpointing_delay=0.3,
+        max_endpointing_delay=4.0,
     )
 
     await session.start(agent=ResumeAgent(), room=ctx.room)
+
+    await session.say(
+        "Hi, I'm Alex." " Ask me about Aditya. or paste a job description.",
+        allow_interruptions=False,
+    )
 
 
 if __name__ == "__main__":
