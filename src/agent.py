@@ -49,7 +49,7 @@ async def entrypoint(ctx: JobContext):
             api_key=os.getenv("SARVAM_API_KEY"),
             target_language_code="en-IN",
             model="bulbul:v3",
-            speaker="rohan",
+            speaker="priya",
         ),
         vad=ctx.proc.userdata["vad"],
         min_endpointing_delay=0.3,
@@ -59,7 +59,7 @@ async def entrypoint(ctx: JobContext):
     await session.start(agent=ResumeAgent(), room=ctx.room)
 
     await session.say(
-        "Hi, I'm Alex." " Ask me about Aditya. or paste a job description.",
+        "Hi, I'm priya." " Ask me about Aditya. or paste a job description.",
         allow_interruptions=False,
     )
 
