@@ -125,43 +125,41 @@ def extract_conversation_turns(raw_items: list[dict[str, Any]]) -> list[dict[str
 
 
 class ResumeAgent(Agent):
-    def __init__(self) -> None:
+    """Single agent for the whole conversation: collects the visitor's name
+    first, then judges JDs / answers identity questions. No handoff — a
+    two-agent handoff was triggering the framework's automatic post-tool
+    LLM reply on the new agent (e.g. "Thank you, Swati!") on top of the
+    greeting we already spoke manually, producing a contradictory double
+    response."""
+
+    def __init__(self, on_name_captured) -> None:
+        self._on_name_captured = on_name_captured
+        self._name_captured = False
         super().__init__(
             instructions=prompt(),
             tools=[check_skill_match],
         )
 
-
-class NameCollector(Agent):
-    """First point of contact. Its only job is to get the visitor's name,
-    then hand off to Priya (ResumeAgent) with a personalized greeting."""
-
-    def __init__(self, on_name_captured) -> None:
-        self._on_name_captured = on_name_captured
-        super().__init__(
-            instructions="""
-You are a brief intake step before Priya (Aditya's assistant) takes over.
-Your ONLY job: ask the visitor's name, then call record_name with it.
-Do not answer any questions, do not discuss Aditya, do not chat. If the visitor
-asks something else first, gently redirect: "I'll just grab your name first!"
-
-Only call record_name once the visitor has actually stated something that
-could be a name. If they say something that clearly isn't a name (a question,
-"no", silence, gibberish, an empty reply), do NOT call the tool — ask again,
-e.g. "Sorry, what's your name?" record_name itself will double-check and
-reject anything that doesn't look like a real name, so if it comes back
-asking you to retry, just ask the visitor again in your own words — never
-invent or guess a name on their behalf.
-"""
-        )
+    async def on_enter(self) -> None:
+        # The entrypoint already speaks the opening "what's your name?"
+        # line manually — don't let the framework's default on_enter
+        # trigger a second, unprompted LLM reply before the visitor has
+        # said anything.
+        pass
 
     @function_tool
-    async def record_name(self, context: RunContext, name: str) -> tuple[Agent, str] | str:
-        """Call this as soon as the visitor states their name.
+    async def record_name(self, context: RunContext, name: str) -> str | None:
+        """Call this as soon as the visitor states their name, before
+        anything else — before judging a JD or answering a question, even
+        if their first message also contains one of those.
 
         Args:
             name: The visitor's name, as they said it (e.g. "Rahul").
         """
+        if self._name_captured:
+            # Already recorded once this session — don't re-greet.
+            return None
+
         candidate = name.strip().split()[0] if name.strip() else ""
         # Reject empty input or anything that's clearly not a name token
         # (too short, non-alphabetic, or an obvious non-answer).
@@ -172,17 +170,18 @@ invent or guess a name on their behalf.
             or len(candidate) < 2
             or candidate.lower() in NON_NAME_WORDS
         ):
-            # Stay on this agent — don't hand off without a real name.
             return "That didn't sound like a name — ask the visitor for their name again."
 
         clean_name = candidate.capitalize()
         self._on_name_captured(clean_name)
-        resume_agent = ResumeAgent()
+        self._name_captured = True
         greeting = f"Hey {clean_name}! Ask me about Aditya, or paste a job description."
         # Speak the exact greeting ourselves so the LLM can't paraphrase a
-        # different transition line ("I'll hand you over to Priya", etc.).
+        # different line, then return None so no automatic LLM reply is
+        # generated on top of it (a non-empty/non-None return would still
+        # get fed back to the LLM and produce a second, redundant reply).
         await context.session.say(greeting, allow_interruptions=False)
-        return resume_agent, ""
+        return None
 
 
 server = AgentServer()
@@ -256,13 +255,15 @@ async def entrypoint(ctx: JobContext):
     if is_console:
         # Local `console` testing — skip the name-collection step entirely.
         captured_name["value"] = "test"
-        await session.start(agent=ResumeAgent(), room=ctx.room)
+        agent = ResumeAgent(on_name_captured)
+        agent._name_captured = True  # suppress record_name's greeting; we say our own below
+        await session.start(agent=agent, room=ctx.room)
         await session.say(
             "Hey test! Ask me about Aditya, or paste a job description.",
             allow_interruptions=False,
         )
     else:
-        await session.start(agent=NameCollector(on_name_captured), room=ctx.room)
+        await session.start(agent=ResumeAgent(on_name_captured), room=ctx.room)
         await session.say(
             "Hi, I'm Priya, Aditya's assistant. Please tell me your name.",
             allow_interruptions=False,
