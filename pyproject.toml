@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Aditya's voice AI resume assistant built on LiveKit Agents"
 requires-python = ">=3.11"
 dependencies = [
+    "asyncpg>=0.31.0",
     "livekit-agents[openai,silero,deepgram,sarvam]~=1.5.17",
     "livekit-plugins-sarvam~=1.5.13",
     "python-dotenv>=1.0.0",
