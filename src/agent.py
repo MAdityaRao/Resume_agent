@@ -18,6 +18,7 @@ from livekit.agents import (
     function_tool,
     inference,
     cli,
+    inference
 )
 from livekit.plugins import silero, sarvam
 from persona import check_skill_match, prompt
@@ -205,12 +206,7 @@ async def entrypoint(ctx: JobContext):
     session_id = uuid.uuid4()
 
     session = AgentSession(
-        stt=sarvam.STT(
-            api_key=os.getenv("SARVAM_API_KEY"),
-            language="en-IN",
-            model="saaras:v3",
-            mode="transcribe",
-        ),
+        stt=inference.STT(model="deepgram/flux-general-multi"),
         llm=inference.LLM(model="openai/gpt-4o-mini"),
         tts=sarvam.TTS(
             api_key=os.getenv("SARVAM_API_KEY"),
