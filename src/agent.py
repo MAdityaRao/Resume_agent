@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 import asyncpg
 from dotenv import load_dotenv
@@ -18,10 +18,9 @@ from livekit.agents import (
     function_tool,
     inference,
     cli,
-    inference
 )
 from livekit.plugins import silero, sarvam
-from persona import check_skill_match, prompt
+from persona import check_skill_match, get_experience, get_projects, get_about, prompt,get_summary
 
 load_dotenv()
 logger = logging.getLogger("resume-agent")
@@ -133,12 +132,12 @@ class ResumeAgent(Agent):
     greeting we already spoke manually, producing a contradictory double
     response."""
 
-    def __init__(self, on_name_captured) -> None:
+    def __init__(self, on_name_captured: Callable[[str], None]) -> None:
         self._on_name_captured = on_name_captured
         self._name_captured = False
         super().__init__(
             instructions=prompt(),
-            tools=[check_skill_match],
+            tools=[check_skill_match, get_experience, get_projects, get_summary, get_about],
         )
 
     async def on_enter(self) -> None:
@@ -188,7 +187,7 @@ class ResumeAgent(Agent):
 server = AgentServer()
 
 
-def prewarm(proc: JobProcess):
+def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
     logger.info("Prewarm complete: VAD ready")
 
@@ -198,7 +197,7 @@ server.setup_fnc = prewarm
 
 # agent_name MUST match what route.js dispatches — this enables explicit dispatch on LiveKit Cloud
 @server.rtc_session(agent_name="Aditya_Agent")
-async def entrypoint(ctx: JobContext):
+async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
 
     await ctx.connect()
@@ -206,22 +205,20 @@ async def entrypoint(ctx: JobContext):
     session_id = uuid.uuid4()
 
     session = AgentSession(
-        stt=inference.STT(model="deepgram/flux-general-multi"),
+        stt=sarvam.STT(model="saaras:v3"),
         llm=inference.LLM(model="openai/gpt-4o-mini"),
         tts=sarvam.TTS(
             api_key=os.getenv("SARVAM_API_KEY"),
-            target_language_code="en-IN",
             model="bulbul:v3",
-            speaker="priya",
+            speaker="ishita",
         ),
         vad=ctx.proc.userdata["vad"],
         turn_handling=TurnHandlingOptions(
             endpointing={
                 "mode": "dynamic",  # adapts to the visitor's actual pause patterns
-                "min_delay": 0.3,   # was 0.3 — trims idle wait before the turn is considered done
-                "max_delay": 3.0,   # was 4.0 — caps worst-case wait on long pauses
+                "min_delay": 0.5,   # trims idle wait before the turn is considered done
+                "max_delay": 3.0,   # caps worst-case wait on long pauses
             },
-           
         ),
     )
 
@@ -247,20 +244,8 @@ async def entrypoint(ctx: JobContext):
 
     # Fires on graceful shutdown (participant disconnects, room closes, etc.)
     ctx.add_shutdown_callback(write_transcript)
-
-    if is_console:
-        # Local `console` testing — skip the name-collection step entirely.
-        captured_name["value"] = "test"
-        agent = ResumeAgent(on_name_captured)
-        agent._name_captured = True  # suppress record_name's greeting; we say our own below
-        await session.start(agent=agent, room=ctx.room)
-        await session.say(
-            "Hey test! Ask me about Aditya, or paste a job description.",
-            allow_interruptions=False,
-        )
-    else:
-        await session.start(agent=ResumeAgent(on_name_captured), room=ctx.room)
-        await session.say(
+    await session.start(agent=ResumeAgent(on_name_captured), room=ctx.room)
+    await session.say(
             "Hi, I'm Priya, Aditya's assistant. Please tell me your name.",
             allow_interruptions=False,
         )
