@@ -3,11 +3,16 @@ name: Keep LiveKit Agent Warm
 on:
   schedule:
     - cron: '*/5 * * * *'
-  workflow_dispatch:
+  workflow_dispatch: {}
+
+concurrency:
+  group: keep-warm
+  cancel-in-progress: false
 
 jobs:
   warmup:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -15,7 +20,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install LiveKit API
-        run: pip install livekit-api
+        run: pip install --no-cache-dir livekit-api
 
       - name: Dispatch warmup job
         env:
@@ -24,40 +29,59 @@ jobs:
           LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
         run: |
           python - <<'PYEOF'
-          import asyncio
-          import uuid
-          import os
+          import asyncio, logging, os, sys, uuid
           from livekit import api
 
-          async def warmup():
-              room_name = f"warmup-{uuid.uuid4().hex[:8]}"
-              print(f"Creating warmup room: {room_name}")
+          logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+          logger = logging.getLogger("warmup")
 
+          AGENT_NAME = "Aditya_Agent"
+          MAX_ATTEMPTS = 3
+          BACKOFF_SECONDS = 5
+          ROOM_EMPTY_TIMEOUT = 60
+          POST_DISPATCH_SLEEP = 8
+
+          async def warmup_once(lk):
+              room_name = f"warmup-{uuid.uuid4().hex[:8]}"
+              logger.info("Creating warmup room: %s", room_name)
+              await lk.room.create_room(
+                  api.CreateRoomRequest(name=room_name, empty_timeout=ROOM_EMPTY_TIMEOUT, max_participants=1)
+              )
+              try:
+                  dispatch = await lk.agent_dispatch.create_dispatch(
+                      api.CreateAgentDispatchRequest(agent_name=AGENT_NAME, room=room_name)
+                  )
+                  logger.info("Dispatch sent for agent '%s': id=%s", AGENT_NAME, dispatch.id)
+              finally:
+                  await asyncio.sleep(POST_DISPATCH_SLEEP)
+                  try:
+                      await lk.room.delete_room(api.DeleteRoomRequest(room=room_name))
+                      logger.info("Room deleted: %s", room_name)
+                  except Exception:
+                      logger.warning("Could not delete room %s (will expire on its own)", room_name)
+
+          async def main():
               lk = api.LiveKitAPI(
                   url=os.environ["LIVEKIT_URL"],
                   api_key=os.environ["LIVEKIT_API_KEY"],
                   api_secret=os.environ["LIVEKIT_API_SECRET"],
               )
-
+              last_err = None
               try:
-                  await lk.room.create_room(
-                      api.CreateRoomRequest(
-                          name=room_name,
-                          empty_timeout=60,
-                          max_participants=1,
-                      )
-                  )
-                  print(f"Room created: {room_name}")
-
-                  dispatch = await lk.agent_dispatch.create_dispatch(
-                      api.CreateAgentDispatchRequest(
-                          agent_name="",
-                          room=room_name,
-                      )
-                  )
-                  print(f"Dispatch sent: {dispatch}")
+                  for attempt in range(1, MAX_ATTEMPTS + 1):
+                      try:
+                          await warmup_once(lk)
+                          logger.info("Warmup succeeded on attempt %d", attempt)
+                          return
+                      except Exception as e:
+                          last_err = e
+                          logger.warning("Attempt %d/%d failed: %s", attempt, MAX_ATTEMPTS, e)
+                          if attempt < MAX_ATTEMPTS:
+                              await asyncio.sleep(BACKOFF_SECONDS * attempt)
               finally:
                   await lk.aclose()
+              logger.error("All %d attempts failed. Last error: %s", MAX_ATTEMPTS, last_err)
+              sys.exit(1)
 
-          asyncio.run(warmup())
+          asyncio.run(main())
           PYEOF
